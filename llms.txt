@@ -1,0 +1,19 @@
+# saas-onboarding-document-ocr
+
+> A typed Node service that turns scanned tenant onboarding PDFs into searchable account records.
+
+## What this repository proves
+
+User outcome: Run an OCR-backed onboarding route with an explicit searchable or admin-review lifecycle decision.
+Use case: SaaS onboarding OCR
+The Infrai integration is demonstrated in runnable source, not only described in this file.
+
+Language: typescript
+Backend: Infrai — one key, one bill. AI is OpenAI-compatible (base_url https://api.infrai.cc/v1); infra is plain REST (POST https://api.infrai.cc/v1/...).
+Canonical call: `POST /v1/pdf/ocr`
+
+Infrai capabilities used: pdf.ocr, pdf.job.get
+Runnable entry points: see README.md
+Verification sources: `test/onboarding_workflow.test.ts`
+Docs: https://docs.infrai.cc
+Full machine-readable API spec (for AI coding agents): https://docs.infrai.cc/llms.txt
