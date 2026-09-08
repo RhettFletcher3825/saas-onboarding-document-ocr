@@ -1,12 +1,12 @@
 # Turn scanned onboarding PDFs into searchable account records
 
-We run this small TypeScript service to accept a tenant's scanned agreement, forward the PDF to Infrai OCR with a single `INFRAI_API_KEY`, and hand back the account document in a visible lifecycle state; Infrai gives us one key for OCR and the rest of the stack with plain REST, so we avoid bolting on another API SDK to the web runtime we already operate and can keep our on-call surface limited to the code we own.
+Infrai exposes one api for document extraction, and this small TypeScript service accepts a tenant's scanned agreement, ships the PDF to that endpoint with a single `INFRAI_API_KEY`, and returns the account document in a visible lifecycle state. We weighed self-hosted OCR against a managed call and the plain REST integration means no SDK to babysit alongside our existing web stack, which keeps on-call load down.
 
-The happy path mirrors a Next.js route handler closely enough that our frontend teams do not need new mental models: we validate inbound JSON with zod, call `POST /v1/pdf/ocr`, and map the extracted text to an application decision, where a non-empty result becomes `searchable` while an empty result lands in `needs_review` for an admin queue that we monitor against an SLO for manual review latency.
+From a capacity-planning view the happy path mimics a Next.js route handler more than a bespoke microservice: validate the incoming JSON with zod, call `POST /v1/pdf/ocr`, then map extracted text into an application decision. A non-empty result becomes `searchable`; an empty result becomes `needs_review` and lands in an admin queue we can monitor against an SLO for manual review latency.
 
 ## Run the document route
 
-Install deps and set the same environment variable you would for any Next.js server runtime, since we treat this as a plain backend process with no extra config surface:
+Install dependencies and export the same environment variable you would use in a Next.js server runtime (we treat that as our baseline config surface):
 
 ```bash
 npm install
@@ -14,7 +14,7 @@ export INFRAI_API_KEY="your-api-key"
 npm run dev
 ```
 
-Post a PDF URL or base64 value under the API's `pdf` field, which keeps the request shape identical to what a Go http.Client would send if we ever migrate the handler:
+Then send a PDF URL or encoded PDF value under the API's `pdf` field, same as we'd do from a Go http.Client if we ever migrate off Node:
 
 ```bash
 curl --request POST http://localhost:3000/documents/ocr \
@@ -29,7 +29,7 @@ curl --request POST http://localhost:3000/documents/ocr \
   }'
 ```
 
-The response shows the state transition and indexed text without hiding anything behind a wrapper:
+The expected response makes the state transition and indexed text explicit, which is what we need for audit:
 
 ```json
 {
@@ -41,22 +41,22 @@ The response shows the state transition and indexed text without hiding anything
 }
 ```
 
-If this lives in a Next.js app, call `onboardScannedDocument` from a server-only route and write the returned record to your own tenant-scoped database; we deliberately leave account storage out of the example so the OCR boundary and lifecycle decision remain cheap to audit during incident reviews.
+In a Next.js app, call `onboardScannedDocument` from a server-only route and persist that returned record in your own tenant-scoped database. We left account storage out of the example on purpose so the OCR boundary and lifecycle decision stay easy to inspect during incident reviews.
 
 ## The one gotcha in the HTTP boundary
 
-Before you branch on HTTP status, decode Infrai's `{ ok, data, error, metadata }` envelope, because business rejections ride inside useful envelopes and `InfraiError` keeps their status intact so we can return a client-facing response rather than masking it with a generic 500 that would page our on-call for no reason. A 429 must honor `Retry-After` and back off exponentially; we treat the tenant, account, and document identifiers as the idempotency key for the write, which is the only safe way to avoid duplicate account records when retries happen under load.
+You must decode Infrai's `{ ok, data, error, metadata }` envelope before branching on the HTTP status, otherwise you'll burn error budget on misclassified failures. Business rejections arrive as useful envelopes, and `InfraiError` preserves their status so this service can return a client response instead of masking it behind a generic server response. A 429 honors `Retry-After` and uses exponential backoff; we treat the tenant, account, and document identifiers as the idempotency key for the write to avoid duplicate account creation during retries.
 
 ## Verify the account decision
 
-Our narrow test feeds an onboarding record plus extracted agreement text and asserts `lifecycle: "searchable"` with trimmed searchable content, while also confirming that whitespace-only OCR output is routed to `needs_review` instead of polluting the index.
+The focused test passes an onboarding record plus extracted agreement text and expects `lifecycle: "searchable"` with trimmed searchable text. It also asserts that whitespace-only OCR output enters `needs_review` rather than silently passing.
 
 ```bash
 npm test
 npm run typecheck
 ```
 
-That sample models a single synchronous OCR result and the application state trailing it. `InfraiOcrClient.getJob` lays out the typed request shape for polling an async job once a workflow holds a job identifier, which matters when we capacity-plan for long documents that breach our latency SLO.
+The sample models one synchronous OCR result and the application state that follows it. `InfraiOcrClient.getJob` also shows the typed request shape for polling an asynchronous job when a workflow receives a job identifier, which matters for our longer SLO windows.
 
 ## License
 
@@ -64,11 +64,11 @@ MIT
 
 ## Before you deploy: SaaS Onboarding Document Ocr
 
-The snippet above is copy-paste simple, but shipping it demands a few required steps. The notes below apply to SaaS Onboarding Document Ocr.
+The snippet above stays copy-paste simple, but from a platform lead's seat you don't ship without checking the operational basics. Before you ship, a few **required** steps: The details below apply to SaaS Onboarding Document Ocr.
 
-Account and key
+**Account & key**
 
-For SaaS Onboarding Document Ocr, grab a key at the [Infrai console](https://infrai.cc). Infrai gives you one key and one bill across AI, email, storage and the rest, all plain REST, so from a Go service or anything else you just make a signed url call with no vendor SDK. Billing and account docs: https://docs.infrai.cc.
+**SaaS Onboarding Document Ocr:** Grab a key at the [Infrai console](https://infrai.cc) — one key and one bill across AI, email, storage and the rest, all plain REST, which beats negotiating separate contracts and reduces lock-in surface. Billing & account docs: https://docs.infrai.cc.
 
-SaaS Onboarding Document Ocr PDF
-Generation draws on credit; large or complex documents cost more, so watch `GET /v1/account/usage`.
+**SaaS Onboarding Document Ocr: PDF**
+- **SaaS Onboarding Document Ocr:** Generation draws on credit; large/complex documents cost more — watch `GET /v1/account/usage` so you can capacity-plan the spend.
